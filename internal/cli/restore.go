@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -67,15 +66,12 @@ func runRestoreWithHomeDir(args []string, restorer RestoreFunc, stdout io.Writer
 			yes = true
 		default:
 			if strings.HasPrefix(a, "-") {
-				// Unknown flag — surface error via flag.FlagSet for consistent messages.
-				fs := flag.NewFlagSet("restore", flag.ContinueOnError)
-				fs.SetOutput(ioDiscard{})
-				_ = fs.Bool("list", false, "")
-				_ = fs.Bool("yes", false, "")
-				if err := fs.Parse(args); err != nil {
-					return fmt.Errorf("parse restore flags: %w", err)
-				}
-				return nil
+				// Unknown flag — fail loudly. Delegating to flag.FlagSet here is
+				// unreliable: Parse stops at the first non-flag argument, so an
+				// unknown flag placed after a positional (`restore latest --force`)
+				// would be silently ignored and the command would exit 0 without
+				// restoring anything.
+				return fmt.Errorf("unknown restore flag %q — usage: gentle-ai restore [--list | latest | <id>] [--yes]", a)
 			}
 			positional = append(positional, a)
 		}
