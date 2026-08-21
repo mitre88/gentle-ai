@@ -278,6 +278,60 @@ func TestRunRestore_UnknownFlagReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("RunRestore(unknown-flag) expected error")
 	}
+	if !strings.Contains(err.Error(), "--this-flag-does-not-exist") {
+		t.Errorf("error should name the offending flag; got: %v", err)
+	}
+}
+
+// TestRunRestore_UnknownFlagAfterPositionalReturnsError verifies that an
+// unknown flag placed AFTER a positional argument (e.g. `restore latest --force`)
+// is rejected instead of silently exiting 0 without restoring anything.
+//
+// Regression test: the previous implementation delegated the error to
+// flag.FlagSet.Parse, which stops at the first non-flag argument, so the parse
+// succeeded, the function returned nil, and the restore never ran.
+func TestRunRestore_UnknownFlagAfterPositionalReturnsError(t *testing.T) {
+	home := setupRestoreHome(t, 1)
+
+	restoreCalled := false
+	restorer := func(m backup.Manifest) error {
+		restoreCalled = true
+		return nil
+	}
+
+	var out strings.Builder
+	err := runRestoreWithHomeDir([]string{"latest", "--force"}, restorer, &out, strings.NewReader(""), home)
+	if err == nil {
+		t.Fatalf("runRestoreWithHomeDir(latest --force) expected error, got nil (silent no-op)")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error should name the offending flag; got: %v", err)
+	}
+	if restoreCalled {
+		t.Errorf("restorer must NOT be called when an unknown flag is present")
+	}
+}
+
+// TestRunRestore_MisspelledYesFlagDoesNotSkipConfirmation verifies that a typo
+// of --yes (e.g. --yse) fails instead of being ignored, which would otherwise
+// make the user believe the restore was confirmed and completed.
+func TestRunRestore_MisspelledYesFlagDoesNotSkipConfirmation(t *testing.T) {
+	home := setupRestoreHome(t, 1)
+
+	restoreCalled := false
+	restorer := func(m backup.Manifest) error {
+		restoreCalled = true
+		return nil
+	}
+
+	var out strings.Builder
+	err := runRestoreWithHomeDir([]string{"backup-000", "--yse"}, restorer, &out, strings.NewReader(""), home)
+	if err == nil {
+		t.Fatalf("runRestoreWithHomeDir(backup-000 --yse) expected error, got nil")
+	}
+	if restoreCalled {
+		t.Errorf("restorer must NOT be called when an unknown flag is present")
+	}
 }
 
 // --- helpers ---
