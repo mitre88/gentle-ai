@@ -16,19 +16,26 @@ type InjectionResult struct {
 
 // claudeCodeOverlayJSON sets Claude Code to bypassPermissions mode (auto-accept all).
 // Valid modes: "acceptEdits", "bypassPermissions", "default", "dontAsk", "plan".
+//
+// The deny list uses the filemerge __append_unique__ sentinel so the stock
+// rules are unioned with whatever the user already has: a plain array here
+// would replace the user's own deny entries wholesale on every install/sync,
+// silently deleting their hardening rules.
 var claudeCodeOverlayJSON = []byte(`{
   "permissions": {
     "defaultMode": "bypassPermissions",
-    "deny": [
-      "Bash(rm -rf /)",
-      "Bash(sudo rm -rf /)",
-      "Bash(rm -rf ~)",
-      "Bash(sudo rm -rf ~)",
-      "Read(.env)",
-      "Read(.env.*)",
-      "Edit(.env)",
-      "Edit(.env.*)"
-    ]
+    "deny": {
+      "__append_unique__": [
+        "Bash(rm -rf /)",
+        "Bash(sudo rm -rf /)",
+        "Bash(rm -rf ~)",
+        "Bash(sudo rm -rf ~)",
+        "Read(.env)",
+        "Read(.env.*)",
+        "Edit(.env)",
+        "Edit(.env.*)"
+      ]
+    }
   }
 }
 `)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 )
 
 func MergeJSONObjects(baseJSON []byte, overlayJSON []byte) ([]byte, error) {
@@ -198,6 +199,58 @@ func asSentinel(v any) (any, bool) {
 	return nil, false
 }
 
+// appendUniqueSentinel is the key used in an overlay map to signal that the
+// list stored under it should be UNIONED with the base list instead of
+// replacing it: base entries are kept (user content is never deleted) and
+// overlay entries are appended only when not already present. If the base
+// value is missing or not a list, the overlay entries are used as-is.
+//
+// Example overlay that adds deny rules without erasing the user's own:
+//
+//	{"permissions": {"deny": {"__append_unique__": ["Read(.env)"]}}}
+const appendUniqueSentinel = "__append_unique__"
+
+// asAppendUniqueSentinel checks if v is a map with exactly one key
+// "__append_unique__" holding a list. If so, it returns the list and true.
+func asAppendUniqueSentinel(v any) ([]any, bool) {
+	m, isMap := v.(map[string]any)
+	if !isMap {
+		return nil, false
+	}
+	entries, hasSentinel := m[appendUniqueSentinel]
+	if !hasSentinel || len(m) != 1 {
+		return nil, false
+	}
+	list, isList := entries.([]any)
+	if !isList {
+		return nil, false
+	}
+	return list, true
+}
+
+// appendUnique returns base with each entry appended unless an equal entry is
+// already present. Equality uses reflect.DeepEqual so non-comparable JSON
+// values (objects, arrays) are handled safely.
+func appendUnique(base []any, entries []any) []any {
+	result := make([]any, 0, len(base)+len(entries))
+	result = append(result, base...)
+
+	for _, entry := range entries {
+		present := false
+		for _, existing := range result {
+			if reflect.DeepEqual(existing, entry) {
+				present = true
+				break
+			}
+		}
+		if !present {
+			result = append(result, entry)
+		}
+	}
+
+	return result
+}
+
 func mergeObjects(base map[string]any, overlay map[string]any) map[string]any {
 	result := make(map[string]any, len(base)+len(overlay))
 	for key, value := range base {
@@ -211,6 +264,14 @@ func mergeObjects(base map[string]any, overlay map[string]any) map[string]any {
 		// force atomic replacement of a nested object instead of deep-merging.
 		if replacement, isSentinel := asSentinel(overlayValue); isSentinel {
 			result[key] = replacement
+			continue
+		}
+
+		// Append-unique sentinel: union the overlay list with the base list
+		// instead of replacing it, preserving any entries the user added.
+		if entries, isAppend := asAppendUniqueSentinel(overlayValue); isAppend {
+			baseList, _ := result[key].([]any)
+			result[key] = appendUnique(baseList, entries)
 			continue
 		}
 
