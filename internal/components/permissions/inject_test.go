@@ -107,6 +107,94 @@ func TestInjectAddsEnvToDenyList(t *testing.T) {
 	t.Fatalf("deny list missing explicit .env rule: %#v", denyList)
 }
 
+// TestInjectClaudeCodePreservesUserDenyEntries verifies that injecting the
+// Claude Code permission overlay does NOT delete deny rules the user added.
+//
+// Regression test: the overlay used to carry a plain deny array, and the JSON
+// merge replaces arrays wholesale, so every install/sync silently wiped the
+// user's own hardening rules and left only the stock list.
+func TestInjectClaudeCodePreservesUserDenyEntries(t *testing.T) {
+	home := t.TempDir()
+
+	settingsDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	existing := `{
+  "permissions": {
+    "deny": [
+      "Bash(my-custom-danger *)",
+      "Read(secrets/**)",
+      "Read(.env)"
+    ]
+  }
+}`
+	settingsPath := filepath.Join(settingsDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(existing), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if _, err := Inject(home, claudeAdapter()); err != nil {
+		t.Fatalf("Inject() error = %v", err)
+	}
+
+	content, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings file: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(content, &settings); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	perms, ok := settings["permissions"].(map[string]any)
+	if !ok {
+		t.Fatalf("permissions node missing: %#v", settings)
+	}
+	denyList, ok := perms["deny"].([]any)
+	if !ok {
+		t.Fatalf("deny list missing or invalid: %#v", perms["deny"])
+	}
+
+	denySet := make(map[string]int, len(denyList))
+	for _, entry := range denyList {
+		if value, ok := entry.(string); ok {
+			denySet[value]++
+		}
+	}
+
+	// User rules must survive.
+	for _, userRule := range []string{"Bash(my-custom-danger *)", "Read(secrets/**)"} {
+		if denySet[userRule] == 0 {
+			t.Errorf("user deny rule %q was deleted by Inject; deny = %#v", userRule, denyList)
+		}
+	}
+
+	// Stock rules must be present.
+	for _, stockRule := range []string{"Bash(rm -rf /)", "Read(.env)", "Edit(.env)"} {
+		if denySet[stockRule] == 0 {
+			t.Errorf("stock deny rule %q missing after Inject; deny = %#v", stockRule, denyList)
+		}
+	}
+
+	// Entries present in both (Read(.env)) must not be duplicated.
+	for rule, count := range denySet {
+		if count > 1 {
+			t.Errorf("deny rule %q duplicated %d times; deny = %#v", rule, count, denyList)
+		}
+	}
+
+	// A second Inject must be a no-op (idempotency).
+	second, err := Inject(home, claudeAdapter())
+	if err != nil {
+		t.Fatalf("Inject() second error = %v", err)
+	}
+	if second.Changed {
+		t.Errorf("Inject() second changed = true — merge is not idempotent")
+	}
+}
+
 func TestInjectClaudeCodeUsesBypassPermissions(t *testing.T) {
 	home := t.TempDir()
 

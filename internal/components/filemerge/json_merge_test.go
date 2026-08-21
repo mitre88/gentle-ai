@@ -238,3 +238,135 @@ func TestMergeJSONObjectsReplaceSentinelNotInOutput(t *testing.T) {
 	}
 	walk(got)
 }
+
+func TestMergeJSONObjectsAppendUniquePreservesBaseEntries(t *testing.T) {
+	base := []byte(`{"deny":["user-rule-1","stock-b","user-rule-2"]}`)
+	overlay := []byte(`{"deny":{"__append_unique__":["stock-a","stock-b"]}}`)
+
+	merged, err := MergeJSONObjects(base, overlay)
+	if err != nil {
+		t.Fatalf("MergeJSONObjects() error = %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("Unmarshal merged error = %v", err)
+	}
+
+	deny, ok := got["deny"].([]any)
+	if !ok {
+		t.Fatalf("deny is not a list: %#v", got["deny"])
+	}
+
+	want := []any{"user-rule-1", "stock-b", "user-rule-2", "stock-a"}
+	if len(deny) != len(want) {
+		t.Fatalf("deny = %#v, want %#v", deny, want)
+	}
+	for i := range want {
+		if deny[i] != want[i] {
+			t.Fatalf("deny[%d] = %v, want %v (full: %#v)", i, deny[i], want[i], deny)
+		}
+	}
+}
+
+func TestMergeJSONObjectsAppendUniqueNoBaseKey(t *testing.T) {
+	base := []byte(`{}`)
+	overlay := []byte(`{"deny":{"__append_unique__":["a","b","a"]}}`)
+
+	merged, err := MergeJSONObjects(base, overlay)
+	if err != nil {
+		t.Fatalf("MergeJSONObjects() error = %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("Unmarshal merged error = %v", err)
+	}
+
+	deny, ok := got["deny"].([]any)
+	if !ok {
+		t.Fatalf("deny is not a list: %#v", got["deny"])
+	}
+	if len(deny) != 2 || deny[0] != "a" || deny[1] != "b" {
+		t.Fatalf("deny = %#v, want [a b] (deduped)", deny)
+	}
+}
+
+func TestMergeJSONObjectsAppendUniqueBaseNotList(t *testing.T) {
+	base := []byte(`{"deny":"corrupted"}`)
+	overlay := []byte(`{"deny":{"__append_unique__":["a"]}}`)
+
+	merged, err := MergeJSONObjects(base, overlay)
+	if err != nil {
+		t.Fatalf("MergeJSONObjects() error = %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("Unmarshal merged error = %v", err)
+	}
+
+	deny, ok := got["deny"].([]any)
+	if !ok {
+		t.Fatalf("deny is not a list: %#v", got["deny"])
+	}
+	if len(deny) != 1 || deny[0] != "a" {
+		t.Fatalf("deny = %#v, want [a]", deny)
+	}
+}
+
+func TestMergeJSONObjectsAppendUniqueIsIdempotent(t *testing.T) {
+	base := []byte(`{"deny":["user-rule"]}`)
+	overlay := []byte(`{"deny":{"__append_unique__":["stock-a","stock-b"]}}`)
+
+	once, err := MergeJSONObjects(base, overlay)
+	if err != nil {
+		t.Fatalf("MergeJSONObjects() first error = %v", err)
+	}
+
+	twice, err := MergeJSONObjects(once, overlay)
+	if err != nil {
+		t.Fatalf("MergeJSONObjects() second error = %v", err)
+	}
+
+	if string(once) != string(twice) {
+		t.Fatalf("second merge changed output:\nfirst:  %s\nsecond: %s", once, twice)
+	}
+}
+
+func TestMergeJSONObjectsAppendUniqueSentinelNotInOutput(t *testing.T) {
+	base := []byte(`{}`)
+	overlay := []byte(`{"nested":{"deny":{"__append_unique__":["a"]}}}`)
+
+	merged, err := MergeJSONObjects(base, overlay)
+	if err != nil {
+		t.Fatalf("MergeJSONObjects() error = %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("Unmarshal error = %v", err)
+	}
+
+	var walk func(m map[string]any)
+	walk = func(m map[string]any) {
+		for k, v := range m {
+			if k == "__append_unique__" {
+				t.Fatalf("sentinel '__append_unique__' leaked into output: %v", m)
+			}
+			if sub, ok := v.(map[string]any); ok {
+				walk(sub)
+			}
+		}
+	}
+	walk(got)
+
+	nested, ok := got["nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested missing: %#v", got)
+	}
+	deny, ok := nested["deny"].([]any)
+	if !ok || len(deny) != 1 || deny[0] != "a" {
+		t.Fatalf("nested.deny = %#v, want [a]", nested["deny"])
+	}
+}
