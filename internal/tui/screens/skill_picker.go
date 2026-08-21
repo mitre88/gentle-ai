@@ -8,30 +8,14 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/tui/styles"
 )
 
-// sddSkillIDs are the SDD orchestrator skills shown in the first group.
-var sddSkillIDs = []model.SkillID{
-	model.SkillSDDInit,
-	model.SkillSDDExplore,
-	model.SkillSDDPropose,
-	model.SkillSDDSpec,
-	model.SkillSDDDesign,
-	model.SkillSDDTasks,
-	model.SkillSDDApply,
-	model.SkillSDDVerify,
-	model.SkillSDDArchive,
-	model.SkillSDDOnboard,
-	model.SkillJudgmentDay,
-}
-
-// foundationSkillIDs are the baseline/learning skills shown in the second group.
-var foundationSkillIDs = []model.SkillID{
-	model.SkillGoTesting,
-	model.SkillCreator,
-	model.SkillBranchPR,
-	model.SkillIssueCreation,
-}
-
 // skillLabels maps each SkillID to a human-readable display label.
+//
+// The rendered groups come from skills.SDDSkillIDs() and
+// skills.FoundationSkillIDs() — the same canonical source that navigation and
+// toggling use via AllSkillsOrdered(). The picker previously kept its own
+// copies of those lists, which drifted when skill-registry was added to the
+// catalog: the cursor could land on a 16th row that rendered nothing and
+// silently toggled skill-registry.
 var skillLabels = map[model.SkillID]string{
 	model.SkillSDDInit:       "SDD Init",
 	model.SkillSDDExplore:    "SDD Explore",
@@ -48,6 +32,7 @@ var skillLabels = map[model.SkillID]string{
 	model.SkillCreator:       "Skill Creator",
 	model.SkillBranchPR:      "Branch & PR",
 	model.SkillIssueCreation: "Issue Creation",
+	model.SkillSkillRegistry: "Skill Registry",
 }
 
 // SkillPickerOptions returns the action buttons shown after the skill checkboxes.
@@ -80,12 +65,14 @@ func RenderSkillPicker(selectedSkills []model.SkillID, cursor int) string {
 	}
 
 	allSkills := AllSkillsOrdered()
+	sddGroup := skills.SDDSkillIDs()
+	foundationGroup := skills.FoundationSkillIDs()
 
 	// ── SDD Skills group ──────────────────────────────────────────────────────
 	b.WriteString(styles.HeadingStyle.Render("SDD Skills"))
 	b.WriteString("\n")
 
-	for idx, skillID := range sddSkillIDs {
+	for idx, skillID := range sddGroup {
 		_, checked := selectedSet[skillID]
 		focused := idx == cursor
 		label := skillLabelFor(skillID)
@@ -98,8 +85,8 @@ func RenderSkillPicker(selectedSkills []model.SkillID, cursor int) string {
 	b.WriteString(styles.HeadingStyle.Render("Foundation Skills"))
 	b.WriteString("\n")
 
-	for i, skillID := range foundationSkillIDs {
-		idx := len(sddSkillIDs) + i
+	for i, skillID := range foundationGroup {
+		idx := len(sddGroup) + i
 		_, checked := selectedSet[skillID]
 		focused := idx == cursor
 		label := skillLabelFor(skillID)

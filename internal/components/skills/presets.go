@@ -54,6 +54,16 @@ func SkillsForPreset(preset model.PresetID) []model.SkillID {
 	}
 }
 
+// SDDSkillIDs returns the SDD orchestrator skills in display order.
+func SDDSkillIDs() []model.SkillID {
+	return copySkills(sddSkills)
+}
+
+// FoundationSkillIDs returns the foundation/learning skills in display order.
+func FoundationSkillIDs() []model.SkillID {
+	return copySkills(foundationSkills)
+}
+
 // AllSkillIDs returns every known skill ID.
 func AllSkillIDs() []model.SkillID {
 	all := make([]model.SkillID, 0, len(sddSkills)+len(foundationSkills))
