@@ -2460,6 +2460,21 @@ func (m Model) confirmProfileCreate() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case 1:
+		// When no OpenCode model cache exists, the screen renders a single
+		// "Back" option (see ProfileCreateOptionCount). Handle it before the
+		// row logic — otherwise Enter at cursor 0 would drop into provider
+		// selection with zero providers, a dead-end screen that responds to
+		// no key. Mirrors the empty-picker guard on ScreenModelPicker.
+		if len(m.ModelPicker.AvailableIDs) == 0 {
+			if m.ProfileEditMode {
+				m.setScreen(ScreenProfiles)
+			} else {
+				m.ProfileCreateStep = 0
+				m.Cursor = 0
+			}
+			return m, nil
+		}
+
 		// Model assignment picker: orchestrator + all sub-agent phases in one screen.
 		// Reuse the same enter-on-row logic as ScreenModelPicker.
 		rows := screens.ModelPickerRows()
