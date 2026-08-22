@@ -1486,6 +1486,62 @@ func TestSyncDoneMsg_ClearsPendingOverrides(t *testing.T) {
 	}
 }
 
+// TestProfileCreate_EmptyModelCacheEnterGoesBack verifies that when the
+// OpenCode model cache is missing (empty ModelPicker), pressing Enter on the
+// single rendered "Back" option in profile-create step 1 goes back to the
+// name step instead of entering provider selection.
+//
+// Regression test: confirmProfileCreate lacked the empty-picker guard that
+// ScreenModelPicker has. Cursor 0 always satisfied `Cursor < len(rows)`, so
+// Enter switched to ModeProviderSelect with zero providers — a dead-end
+// screen where every key (including Enter) was unhandled and looped back to
+// the same empty provider list.
+func TestProfileCreate_EmptyModelCacheEnterGoesBack(t *testing.T) {
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenProfileCreate
+	m.ProfileCreateStep = 1
+	m.ProfileEditMode = false
+	m.ModelPicker = screens.ModelPickerState{} // no model cache
+	m.Cursor = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state := updated.(Model)
+
+	if state.ModelPicker.Mode == screens.ModeProviderSelect {
+		t.Fatal("enter with empty model cache must NOT enter provider selection (dead-end screen)")
+	}
+	if state.ProfileCreateStep != 0 {
+		t.Fatalf("ProfileCreateStep = %d, want 0 (back to name step)", state.ProfileCreateStep)
+	}
+	if state.Screen != ScreenProfileCreate {
+		t.Fatalf("Screen = %v, want %v", state.Screen, ScreenProfileCreate)
+	}
+	if state.Cursor != 0 {
+		t.Fatalf("Cursor = %d, want 0", state.Cursor)
+	}
+}
+
+// TestProfileCreate_EmptyModelCacheEnterGoesBackInEditMode verifies the same
+// guard in edit mode: Enter on "Back" returns to the profiles list.
+func TestProfileCreate_EmptyModelCacheEnterGoesBackInEditMode(t *testing.T) {
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenProfileCreate
+	m.ProfileCreateStep = 1
+	m.ProfileEditMode = true
+	m.ModelPicker = screens.ModelPickerState{} // no model cache
+	m.Cursor = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state := updated.(Model)
+
+	if state.ModelPicker.Mode == screens.ModeProviderSelect {
+		t.Fatal("enter with empty model cache must NOT enter provider selection (dead-end screen)")
+	}
+	if state.Screen != ScreenProfiles {
+		t.Fatalf("Screen = %v, want %v (back to profiles list)", state.Screen, ScreenProfiles)
+	}
+}
+
 // TestSyncDoneMsg_CursorClampedAfterProfileListRefresh verifies that when
 // SyncDoneMsg causes the ProfileList to shrink, the cursor is clamped so it
 // never points past the end of the new list.
