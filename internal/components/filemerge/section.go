@@ -20,6 +20,77 @@ var legacyPersonaFingerprints = []string{
 	"## Rules",
 }
 
+// legacyPersonaHeadings are the markdown section headings the persona assets
+// ship with (current and historical variants). They bound the legacy block:
+// it starts at the first such heading and ends at the first level-1/level-2
+// heading that is NOT one of these — that heading begins user content.
+// "## Skills" is matched by prefix because its full text carries a suffix
+// ("## Skills (Auto-load based on context)").
+var legacyPersonaHeadings = []string{
+	"## Rules",
+	"## Personality",
+	"## Language",
+	"## Tone",
+	"## Philosophy",
+	"## Expertise",
+	"## Behavior",
+	"## Skills",
+}
+
+// isLegacyPersonaHeading reports whether line is one of the persona-owned
+// section headings (exact match or with a trailing suffix like "(...)").
+func isLegacyPersonaHeading(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	for _, heading := range legacyPersonaHeadings {
+		if trimmed == heading || strings.HasPrefix(trimmed, heading+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+// legacyPersonaBlockBounds scans content[:zoneEnd] line by line and returns
+// the [start, end) byte range of the legacy persona block: start is the first
+// persona-owned heading at a line boundary, end is the first level-1/level-2
+// heading after start that is NOT persona-owned (user content), or zoneEnd.
+// Deeper headings (###+) are consumed as part of the block. Returns start=-1
+// when no persona heading is found at a line boundary.
+func legacyPersonaBlockBounds(content string, zoneEnd int) (int, int) {
+	start := -1
+	offset := 0
+
+	for offset < zoneEnd {
+		next := zoneEnd
+		line := content[offset:zoneEnd]
+		if nl := strings.IndexByte(line, '\n'); nl >= 0 {
+			line = line[:nl]
+			next = offset + nl + 1
+		}
+
+		if start < 0 {
+			if isLegacyPersonaHeading(line) {
+				start = offset
+			}
+		} else if isUserTopLevelHeading(line) {
+			return start, offset
+		}
+
+		offset = next
+	}
+
+	return start, zoneEnd
+}
+
+// isUserTopLevelHeading reports whether line is a level-1 or level-2 markdown
+// heading that does not belong to the persona asset.
+func isUserTopLevelHeading(line string) bool {
+	trimmed := strings.TrimRight(line, "\r")
+	if !strings.HasPrefix(trimmed, "# ") && !strings.HasPrefix(trimmed, "## ") {
+		return false
+	}
+	return !isLegacyPersonaHeading(trimmed)
+}
+
 // StripLegacyPersonaBlock removes a free-text Gentleman persona block that was
 // written to a markdown file outside of <!-- gentle-ai: --> markers.
 //
@@ -30,6 +101,11 @@ var legacyPersonaFingerprints = []string{
 // section is ignored — this prevents false positives when a user's own section
 // headers happen to match one or two of the fingerprint strings while the
 // remaining fingerprints live inside a managed marker block.
+//
+// The strip is bounded to the persona block itself: user content before the
+// block and after it (up to the first marker) is preserved. Only the span
+// from the first persona-owned heading to the next user heading (or the
+// first marker / EOF) is removed.
 func StripLegacyPersonaBlock(content string) string {
 	// Quick check: all fingerprints must be present somewhere in the file.
 	for _, fp := range legacyPersonaFingerprints {
@@ -45,8 +121,10 @@ func StripLegacyPersonaBlock(content string) string {
 
 	// Determine the candidate zone to inspect.
 	zone := content
+	zoneEnd := len(content)
 	if firstMarkerIdx >= 0 {
 		zone = content[:firstMarkerIdx]
+		zoneEnd = firstMarkerIdx
 	}
 
 	// Verify that ALL fingerprints live in the pre-marker zone.
@@ -61,18 +139,28 @@ func StripLegacyPersonaBlock(content string) string {
 		}
 	}
 
-	// Strip the legacy zone: remove it entirely and keep the marker content.
-	if firstMarkerIdx < 0 {
-		// No markers at all — the entire file is legacy persona content.
-		// Return empty string so the caller can write a fresh section.
-		return ""
+	// Bound the strip to the persona block itself instead of deleting the
+	// whole pre-marker zone: user notes above or below the block survive.
+	start, end := legacyPersonaBlockBounds(content, zoneEnd)
+	if start < 0 {
+		// Fingerprints are present but no persona heading sits at a line
+		// boundary — don't guess at boundaries; leave the file untouched.
+		return content
 	}
 
-	// Keep everything from the first marker onwards.
-	remainder := content[firstMarkerIdx:]
-	// Trim any leading blank lines between the stripped block and the first marker.
-	remainder = strings.TrimLeft(remainder, "\r\n")
-	return remainder
+	before := strings.TrimRight(content[:start], "\r\n")
+	after := strings.TrimLeft(content[end:], "\r\n")
+
+	if before == "" && after == "" {
+		return ""
+	}
+	if before == "" {
+		return after
+	}
+	if after == "" {
+		return before + "\n"
+	}
+	return before + "\n\n" + after
 }
 
 const (
