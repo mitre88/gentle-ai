@@ -283,16 +283,103 @@ func TestStripLegacyPersonaBlock_EmptyFileReturnsSame(t *testing.T) {
 }
 
 func TestStripLegacyPersonaBlock_UserContentBeforeAndAfterMarkersPreserved(t *testing.T) {
-	// User has hand-written notes before the legacy block — these should survive
-	// IF they are not part of the legacy block.  Since the legacy detection works
-	// by looking for fingerprints before the first marker, user content that
-	// predates the legacy block would also be stripped.  This is an accepted
-	// tradeoff documented in the function comment.
+	// User content after the markers must always survive the strip.
 	input := legacyPersonaBlock + "\n" + gentleAiMarkerSection + "\n# Custom section\n\nUser stuff.\n"
 	result := StripLegacyPersonaBlock(input)
 
 	if !strings.Contains(result, "# Custom section") {
 		t.Fatal("content after gentle-ai markers must be preserved")
+	}
+}
+
+// TestStripLegacyPersonaBlock_UserNotesBeforeBlockPreserved verifies that
+// hand-written user content ABOVE the legacy persona block survives.
+//
+// Regression test: the strip used to delete the entire pre-marker zone, so a
+// user who kept their own notes above the stale persona block lost them the
+// next time the installer ran with persona enabled.
+func TestStripLegacyPersonaBlock_UserNotesBeforeBlockPreserved(t *testing.T) {
+	userNotes := "# My own important instructions\n\n- Always answer in Spanish.\n- Prefer table output.\n"
+	input := userNotes + "\n" + legacyPersonaBlock + "\n" + gentleAiMarkerSection
+	result := StripLegacyPersonaBlock(input)
+
+	if !strings.Contains(result, "# My own important instructions") {
+		t.Fatalf("user notes before the legacy block were deleted:\n%s", result)
+	}
+	if !strings.Contains(result, "- Always answer in Spanish.") {
+		t.Fatalf("user note body before the legacy block was deleted:\n%s", result)
+	}
+	if strings.Contains(result, "## Rules") {
+		t.Fatalf("legacy block was not stripped:\n%s", result)
+	}
+	if !strings.Contains(result, "<!-- gentle-ai:persona -->") {
+		t.Fatalf("marker section must be preserved:\n%s", result)
+	}
+}
+
+// TestStripLegacyPersonaBlock_UserSectionAfterBlockPreserved verifies that a
+// user section written BETWEEN the legacy block and the first marker survives.
+func TestStripLegacyPersonaBlock_UserSectionAfterBlockPreserved(t *testing.T) {
+	userSection := "# Project conventions\n\nUse pnpm, never npm.\n"
+	input := legacyPersonaBlock + "\n" + userSection + "\n" + gentleAiMarkerSection
+	result := StripLegacyPersonaBlock(input)
+
+	if !strings.Contains(result, "# Project conventions") {
+		t.Fatalf("user section after the legacy block was deleted:\n%s", result)
+	}
+	if !strings.Contains(result, "Use pnpm, never npm.") {
+		t.Fatalf("user section body after the legacy block was deleted:\n%s", result)
+	}
+	if strings.Contains(result, "## Rules") {
+		t.Fatalf("legacy block was not stripped:\n%s", result)
+	}
+	if !strings.Contains(result, "<!-- gentle-ai:persona -->") {
+		t.Fatalf("marker section must be preserved:\n%s", result)
+	}
+}
+
+// TestStripLegacyPersonaBlock_NoMarkersUserNotesPreserved verifies that when
+// the file has no markers at all, only the legacy block is removed and the
+// user's surrounding notes are kept (the old code returned "" and destroyed
+// the whole file content).
+func TestStripLegacyPersonaBlock_NoMarkersUserNotesPreserved(t *testing.T) {
+	userNotes := "# My memory file\n\nImportant context I wrote myself.\n"
+	input := userNotes + "\n" + legacyPersonaBlock
+	result := StripLegacyPersonaBlock(input)
+
+	if !strings.Contains(result, "# My memory file") {
+		t.Fatalf("user notes were deleted along with the legacy block:\n%s", result)
+	}
+	if strings.Contains(result, "## Rules") {
+		t.Fatalf("legacy block was not stripped:\n%s", result)
+	}
+}
+
+// TestStripLegacyPersonaBlock_FingerprintsWithoutHeadingAtLineStart verifies
+// the conservative fallback: when all fingerprints are present but no
+// persona-owned heading sits at a line boundary, nothing is stripped.
+func TestStripLegacyPersonaBlock_FingerprintsWithoutHeadingAtLineStart(t *testing.T) {
+	input := "My notes mention ## Rules and ## Personality and Senior Architect inline.\n"
+	result := StripLegacyPersonaBlock(input)
+	if result != input {
+		t.Fatalf("no line-start persona heading: expected unchanged result:\ngot:  %q\nwant: %q", result, input)
+	}
+}
+
+// TestStripLegacyPersonaBlock_SkillsHeadingWithSuffixConsumed verifies that
+// the persona's "## Skills (Auto-load based on context)" heading is treated
+// as part of the block, while a distinct user heading ends it.
+func TestStripLegacyPersonaBlock_SkillsHeadingWithSuffixConsumed(t *testing.T) {
+	legacyWithSkills := legacyPersonaBlock + "## Skills (Auto-load based on context)\n\n| Context | Skill |\n\n"
+	userSection := "# Team notes\n\nKeep this.\n"
+	input := legacyWithSkills + userSection + "\n" + gentleAiMarkerSection
+	result := StripLegacyPersonaBlock(input)
+
+	if strings.Contains(result, "## Skills (Auto-load based on context)") {
+		t.Fatalf("persona Skills section was not stripped:\n%s", result)
+	}
+	if !strings.Contains(result, "# Team notes") {
+		t.Fatalf("user section after the block was deleted:\n%s", result)
 	}
 }
 
